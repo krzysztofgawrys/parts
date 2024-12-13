@@ -23,7 +23,7 @@ app.use(express.static(path.join(__dirname, 'public')));
 app.set('view engine', 'ejs');
 
 // MongoDB connection
-mongoose.connect('mongodb://127.0.0.1:27017/parts', {
+mongoose.connect('mongodb://mongodb:27017/parts', {
   useNewUrlParser: true,
   useUnifiedTopology: true,
   user: 'admin',
