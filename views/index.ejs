@@ -78,6 +78,55 @@
   });
     }
   </script>
+
+<script>
+  async function uploadBOM() {
+    const form = document.getElementById('uploadForm');
+    const formData = new FormData(form);
+    const response = await fetch('/upload-bom', {
+      method: 'POST',
+      body: formData,
+    });
+
+    const data = await response.json();
+
+    if (data.error) {
+      alert(data.error);
+      return;
+    }
+
+    const resultsTable = document.getElementById('results');
+    resultsTable.innerHTML = ''; // Clear previous results
+
+  // Create table header
+  const headerRow = document.createElement('tr');
+  const headers = [
+    'LCSC Part Number', 'Package', 'Description', 'Order Qty.',
+  ];
+  headers.forEach(header => {
+    const th = document.createElement('th');
+    th.textContent = header;
+    headerRow.appendChild(th);
+  });
+  resultsTable.appendChild(headerRow);
+
+  // Add rows with search results
+  data.missingComponents.forEach(result => {
+    const row = document.createElement('tr');
+    Object.entries(result).forEach(([key, value]) => {
+      // Skip the __id field
+      if (key === '_id' || key === 'Unit Price($)' || key === 'Order Price($)' || key === 'Min\\Mult Order Qty.' || key === 'Customer NO.' || key === 'RoHS') return;
+      
+      const td = document.createElement('td');
+      td.textContent = value;
+      row.appendChild(td);
+    });
+    resultsTable.appendChild(row);
+  });
+
+    // Optionally, you can also display processed components in another table
+  }
+</script>
 </head>
 <body class="py-2">
   <div class="container">
@@ -91,6 +140,16 @@
       <button type="submit" class="btn btn-primary">Search</button>
     </form>
   </div>
+
+  <form id="uploadForm" enctype="multipart/form-data">
+    <div class="mb-3 row">
+      <label for="bomFile" class="form-label">Upload BOM CSV:</label>
+      <div class="col-6">
+        <input type="file" id="bomFile" name="bomFile" class="form-control" accept=".csv" required>
+      </div>
+    </div>
+    <button type="button" class="btn btn-primary" onclick="uploadBOM()">Upload and Check</button>
+  </form>
 
   <!-- Use Flexbox to center the table vertically -->
   <div class="table-container">

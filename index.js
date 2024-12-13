@@ -4,6 +4,13 @@ const mongoose = require('mongoose');
 const bodyParser = require('body-parser');
 const path = require('path');
 const { readFile } = require('fs/promises');
+// Import necessary modules
+const multer = require('multer');
+const csvParser = require('csv-parser');
+const fs = require('fs');
+
+// Configure multer for file uploads
+const upload = multer({ dest: 'uploads/' });
 
 // Initialize the app
 const app = express();
@@ -16,7 +23,7 @@ app.use(express.static(path.join(__dirname, 'public')));
 app.set('view engine', 'ejs');
 
 // MongoDB connection
-mongoose.connect('mongodb://mongodb:27017/parts', {
+mongoose.connect('mongodb://127.0.0.1:27017/parts', {
   useNewUrlParser: true,
   useUnifiedTopology: true,
   user: 'admin',
@@ -43,10 +50,82 @@ const partSchema = new mongoose.Schema({
 
 const Part = mongoose.model('parts', partSchema);
 
+// Create an index on text fields for text search
+Part.collection.createIndex({
+  "LCSC Part Number": "text",
+  "Manufacture Part Number": "text",
+  "Manufacturer": "text",
+  "Description": "text",
+});
+
+
 // Routes
 app.get('/', async (req, res) => {
   const html = await readFile(path.join(__dirname, 'views', 'index.ejs'), 'utf-8');
   res.send(html);
+});
+
+// Route to upload and process BOM CSV
+app.post('/upload-bom', upload.single('bomFile'), (req, res) => {
+  if (!req.file) {
+    return res.status(400).json({ error: 'No file uploaded' });
+  }
+
+  const missingComponents = [];
+  const processedComponents = [];
+  const tasks = []; // Array to store promises for database operations
+
+  // Parse the uploaded CSV
+  fs.createReadStream(req.file.path)
+    .pipe(csvParser())
+    .on('data', (row) => {
+      let { 'LCSC Part #': partNumber, 'Footprint': footprints, 'Value': value, 'Quantity': quality } = row;
+
+      // Ensure footprints and value are strings and trim leading zeros from footprints
+      footprints = typeof footprints === 'string' ? footprints : '';
+      value = typeof value === 'string' ? value : '';
+
+      // Create a promise for each database lookup
+      const task = Part.findOne({
+        $or: [
+          { 'LCSC Part Number': partNumber },
+          {
+            $and: [
+              { Description: { $regex: value, $options: 'i' } },
+              { Package: { $regex: footprints, $options: 'i' } }
+            ]
+          }
+        ]
+      })
+        .then((part) => {
+          if (part) {
+            processedComponents.push(part);
+          } else {
+            missingComponents.push({ partNumber, footprints, value, quality });
+          }
+        })
+        .catch((err) => console.error('Error processing row:', err));
+
+      tasks.push(task);
+    })
+    .on('end', async () => {
+      try {
+        // Wait for all tasks to complete
+        await Promise.all(tasks);
+
+        // Delete the temporary file
+        fs.unlinkSync(req.file.path);
+
+        // Respond with the results
+        res.json({
+          processedComponents,
+          missingComponents,
+        });
+      } catch (err) {
+        console.error('Error waiting for tasks:', err);
+        res.status(500).json({ error: 'Error processing file' });
+      }
+    });
 });
 
 app.post('/search', async (req, res) => {
@@ -75,14 +154,6 @@ app.post('/search', async (req, res) => {
     console.error(err);
     res.status(500).json({ error: 'Error occurred while searching.' });
   }
-});
-
-// Create an index on text fields for text search
-Part.collection.createIndex({
-  "LCSC Part Number": "text",
-  "Manufacture Part Number": "text",
-  "Manufacturer": "text",
-  "Description": "text",
 });
 
 // Start the server
